@@ -9,9 +9,10 @@ class Programa(Nodo):
         self.lista_de_clases = list_clases
 
     def __str__(self):
+        resultado = ""
         for cl in self.lista_de_clases:
-            return str(cl)
-
+            resultado += str(cl)
+        return resultado
 
 class ClaseDeCool(Nodo):
     def __init__(self, lista_de_miembros, nombre, clase_base=None):
@@ -20,8 +21,8 @@ class ClaseDeCool(Nodo):
         self.clase_base = clase_base
 
     def __str__(self):
-        result = ""
-        result = result + str(self.id + ":" + self.clase_base) + "\n"
+        result = "class "
+        result = result + f"{self.id} : {self.clase_base}" + "\n"
         for m in self.lista_de_miembros:
             result = result + "    " + str(m) + "\n"
 
@@ -34,7 +35,7 @@ class Miembro(Nodo):
 
 
 class DefAtributo(Miembro):
-    def __init__(self, id, tipo, exprecion):
+    def __init__(self, id, tipo, exprecion = None):
         self.id = id
         self.tipo = tipo
         self.exprecion = exprecion
@@ -54,22 +55,13 @@ class DefFuncion(Miembro):
         return str(
             self.id
             + "("
-            + str([str(p) for p in self.parametros])
+            + str([ f"{i} : {t}" for i,t in self.parametros])
             + ")"
             + " : "
             + self.tipo
             + " -> "
             + str(self.cuerpo)
         )
-
-class Parametro(Nodo):
-    def __init__(self, tipo, id):
-        self.id = id
-        self.tipo = tipo
-
-    def __str__(self):
-        return str(self.id + ": " + self.tipo)
-
 
 ################# Expreciones ######################
 ####################################################
@@ -78,7 +70,7 @@ class Exprecion(Nodo):
 
 class Invocacion(Exprecion):
     def __init__(self, exp, id, lista_de_exp):
-        self.id = idx
+        self.id = id
         self.exp = exp
         self.lista_de_exp = lista_de_exp
 
@@ -87,20 +79,56 @@ class Invocacion(Exprecion):
 
 class InvocacionEstatica(Exprecion):
     def __init__(self, exp, tipo_especifico, id, lista_de_exp):
-        self.id = idx
+        self.id = id
         self.exp = exp
         self.tipo_especifico = tipo_especifico
         self.lista_de_exp = lista_de_exp
 
     def __str__(self):
+        result = f"{self.exp}({self.tipo_especifico}).{self.id}(\n"
+        for e in self.lista_de_exp:
+            result += str(e) + ",\n"
 
-        return str("InvocacionEstatica")
-
+        return result + ")"
 
 ########### Expreciones Estilo Estructura ##########
 ####################################################
-def Estructura(Expression):
+class Estructura(Exprecion):
     pass 
+
+class Asignacion(Estructura):
+    def __init__(self, id, valor):
+        self.id = id
+        self.valor = valor
+
+    def __str__(self):
+        return str("Assign")
+
+
+class IfThenElse(Estructura):
+    def __init__(self, condicion, exp_si_true, exp_si_false):
+        self.condicion = condicion
+        self.exp_si_true = exp_si_true
+        self.exp_si_false = exp_si_false
+
+    def __str__(self):
+        return str("IfThenElse")
+
+
+class WhileLoop(Estructura):
+    def __init__(self, condicion, exp):
+        self.condicion = condicion
+        self.exp = exp
+
+    def __str__(self):
+        return str("While")
+
+class Block(Estructura):
+    def __init__(self, lista_de_exp):
+        self.lista_de_exp = lista_de_exp
+
+    def __str__(self):
+        return str("block: " + str(self.lista_de_exp))
 
 class LetIn(Estructura):
     def __init__(self, lista_de_acciones, exp):
@@ -118,42 +146,6 @@ class Case(Estructura):
 
     def __str__(self):
         return str("Case " + str(self.exp) + ": " + self.lista_de_casos)
-
-
-class WhileLoop(Estructura):
-    def __init__(self, condicion, exp):
-        self.condicion = condicion
-        self.exp = exp
-
-    def __str__(self):
-        return str("While")
-
-
-class IfThenElse(Estructura):
-    def __init__(self, condicion, exp_si_true, exp_si_false):
-        self.condicion = condicion
-        self.exp_si_true = exp_si_true
-        self.exp_si_false = exp_si_false
-
-    def __str__(self):
-        return str("IfThenElse")
-
-
-class Block(Estructura):
-    def __init__(self, lista_de_exp):
-        self.lista_de_exp = lista_de_exp
-
-    def __str__(self):
-        return str("block: " + str(self.lista_de_exp))
-
-
-class Assignacion(Estructura):
-    def __init__(self, id, valor):
-        self.id = id
-        self.valor = valor
-
-    def __str__(self):
-        return str("Assign")
 
 
 ################ Expreciones Unarias ###############
@@ -202,53 +194,53 @@ class Binaria(Exprecion):
 ################ Comparaciones ######################
 #####################################################
 class Comparacion(Binaria):
-    pass
-
+    def __str__(self):
+        pass
 
 class MenorOIqual(Comparacion):
     def __str__(self):
-        return str("MenorOIqual")
+        return str("<=")
 
 
 class Igual(Comparacion):
     def __str__(self):
-        return str("Igual")
+        return str("==")
 
 
 class Menor(Comparacion):
     def __str__(self):
-        return str("Menor")
+        return str("<")
 
 
 ################ Aritmeticas ######################
 #####################################################
 class Aritmetica(Binaria):
-    pass
-
+    def __str__(self):
+        pass
 
 class Suma(Aritmetica):
     def __str__(self):
-        return str("Suma")
+        return str("+")
 
 
 class Resta(Aritmetica):
     def __str__(self):
-        return str("Resta")
+        return str("-")
 
 
 class Multiplicacion(Aritmetica):
     def __str__(self):
-        return str("Multiplicacion")
+        return str("*")
 
 
 class Division(Aritmetica):
     def __str__(self):
-        return str("Division")
+        return str("/")
 
 
 ################ Expreciones Atomica 3###############
 #####################################################
-class Atomica(Expression):
+class Atomica(Exprecion):
     def __init__(self, lex):
         self.lex = lex
 
