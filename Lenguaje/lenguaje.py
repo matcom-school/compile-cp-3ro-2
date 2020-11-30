@@ -1,6 +1,6 @@
 from cmp.pycompiler import Grammar
 
-from . import *
+from .nodos_del_ast import *
 
 G = Grammar()
 # non-terminals
@@ -47,29 +47,15 @@ Param %= id_t + colon + id_t, lambda h,s: (s[1], s[3])
 lista_expre %= expr + semi, lambda h,s: [s[1]]
 lista_expre %= expr + semi + lista_expre, lambda h,s: [s[1]] + s[3]
 # <expr>
+#expr %= opar + expr + cpar
 expr %= id_t + larrow + expr, lambda h,s: Asignacion(s[1], s[3])
 expr %= ocur + lista_expre + ccur, lambda h,s: Block(s[2])
 expr %= decla + lista_decla_variable + in_t + expr, lambda h,s: LetIn(s[2], s[4])
-expr %= case + expr + of + case_var_list + esac, lambda h,s: Case(s[2], s[4])#
-#expr %= if_t + expr + then + expr + else_t + expr + fi, lambda h,s: IfDeclarationNode(s[2], s[4], s[6])#
-expr %= while_t + expr + loop + expr + pool, lambda h,s: WhileLoop(s[2], s[4])#
-#expr %= id_t + opar + lista_argum + cpar, lambda h,s: CallNode(s[3][0], s[1], s[3])
-#expr %= expr + dot + id_t + opar + lista_argum + cpar, lambda h,s: CallNode(s[1], s[3], s[5])
-#expr %= expr + at + id_t + dot + id_t + opar + lista_argum + cpar, lambda h,s: CallNode((s[1], s[3]), s[5], s[7])#Verificar s[3] sea subclase de s[1]
-#expr %= new + id_t, lambda h,s: InstantiateNode(s[2])
+expr %= case + expr + of + case_var_list + esac, lambda h,s: Case(s[2], s[4])
+expr %= while_t + expr + loop + expr + pool, lambda h,s: WhileLoop(s[2], s[4])
 expr %= isVoid + expr, lambda h,s: FuncionIsVoid(s[2])
 expr %= hyphen + expr, lambda h,s: Complemento(s[2])
-#expr %= expr + plus + expr, lambda h,s: PlusNode(s[1], s[3])#
-#expr %= expr + minus + expr, lambda h,s: MinusNode(s[1], s[3])#
-#expr %= expr + star + expr, lambda h,s: StarNode(s[1], s[3])#
-#expr %= expr + div + expr, lambda h,s: Division(s[1], s[3])#
-#expr %= expr + lesser + expr, lambda h,s: LesserNode(s[1], s[3])#
-#expr %= expr + equal + expr, lambda h,s: EqualNode(s[1], s[3])#
-#expr %= expr + lesser + equal + expr, lambda h,s: LesserEqualNode(s[1], s[4])#
 expr %= not_t + expr, lambda h,s: Negacion(s[2])
-#expr %= opar + expr + cpar, lambda h,s: s[2]
-#expr %= id_t, lambda h,s: VariableNode(s[2])
-#expr %= num, lambda h, s: ConstantNumNode(s[1])
 expr %= cond, lambda h,s: s[1]
 # <decla_variable,-list>
 lista_decla_variable %= decla_variable + comma + lista_decla_variable, lambda h,s: [s[1]] + s[3]  
@@ -101,19 +87,15 @@ cond %= cond + lesser + equal + arith, lambda h,s: MenorOIqual(s[1],s[4])
 cond %= arith, lambda h,s: s[1]
 # <factor>      
 factor %= atom, lambda h, s: s[1]
-factor %= opar + expr + cpar, lambda h, s: s[2]
+factor %= opar + expr + cpar, lambda h, s: ExprEntreParantesis(s[2])
 factor %= if_t + expr + then + expr + else_t + expr + fi, lambda h,s: IfThenElse(s[2], s[4], s[6])
 factor %= id_t + opar + lista_argum + cpar, lambda h,s: Invocacion(None, s[1], s[3])
 factor %= factor + dot + id_t + opar + lista_argum + cpar, lambda h,s: Invocacion(s[1], s[3], s[5])
-factor %= factor + at + id_t + dot + id_t + opar + lista_argum + cpar, lambda h,s: InvocacionEstatica((s[1], s[3]), s[5], s[7])#Verificar s[3] sea subclase de s[1]
-#factor %= factor + inv_func, lambda h,s: CallNode(s[1], s[2][0], s[2][1])
+factor %= factor + at + id_t + dot + id_t + opar + lista_argum + cpar, lambda h,s: InvocacionEstatica(s[1], s[3], s[5], s[7])
 # <atom>
 atom %= true, lambda h,s: Bool(True)
 atom %= false, lambda h,s: Bool(False) 
 atom %= string, lambda h, s: String(s[1])
-atom %= num, lambda h, s: Entero(s[1])
+atom %= num, lambda h, s: Int(s[1])
 atom %= id_t, lambda h, s: Identificador(s[1])
 atom %= new + id_t, lambda h,s: NuevoTipo(s[2])
-
-# <inv_func>
-#inv_func %= dot + id_t + opar + lista_argum + cpar, lambda h, s: (s[2], s[4])        

@@ -1,4 +1,4 @@
-from .tipos_predefinidos import dicc_de_tipos_predefinidos, Auto, TipoPredefinidos
+from .tipos_predefinidos import dicc_de_tipos_predefinidos, Auto, TipoPredefinidos, Self
 from .lenguaje import G
 
 

@@ -29,20 +29,24 @@ class ChequeoSemantico:
             if clase_base.parent.is_auto_type:
                 self.errores.append( f"ClassDefinitionError: Can't use {clase_base.parent.name} in herence")
                 break
-            clase_base = clase_base.parent
+            clase_base = clase_base.parent.real_type(self.contexto.current_type)
             if clase_base.name == nodo.id:
                 self.errores.append("ClassDefinitionError: " + MensajeDeError.herencia_circular(nodo.id))
                 break
-
+        
         for atri in self.contexto.current_type.attributes:
             mi_ambiente.define_variable( atri.name, atri.type)
         
+        for atri, tipo  in reversed( self.contexto.current_type.all_attributes() ):
+            if not mi_ambiente.is_local(atri.name):
+                mi_ambiente.define_variable( atri.name, atri.type)
+            
         for m in nodo.lista_de_miembros:
             self.visita(m, mi_ambiente)
 
     @visitor.when( DefAtributo)
     def visita(self, nodo : DefAtributo, mi_ambiente : Scope):
-        tipo : Type = self.contexto.get_type( nodo.tipo )
+        tipo : Type = self.contexto.get_type( nodo.tipo ).real_type(self.contexto.current_type)
         if nodo.exprecion is not None:
             tipo_de_la_expr: Type = self.visita(nodo.exprecion, mi_ambiente)
 
@@ -57,7 +61,6 @@ class ChequeoSemantico:
 
         if nodo.exprecion is not None and not tipo_de_la_expr.conforms_to(tipo):
             self.errores.append("AttributeDefinitionError: " + MensajeDeError.asignacion(tipo.name,tipo_de_la_expr.name))
-        mi_ambiente.define_variable( nodo.id, tipo)
 
     @visitor.when( DefFuncion )
     def visita(self, nodo : DefFuncion, mi_ambiente : Scope):
@@ -65,21 +68,22 @@ class ChequeoSemantico:
         metodo = self.contexto.current_type.get_method(nodo.id)
 
         for i, nombre in enumerate(metodo.param_names):
-            mi_ambiente.define_variable(nombre, metodo.param_types[i])
+            mi_ambiente.define_variable(nombre, metodo.param_types[i].real_type(self.contexto.current_type))
 
         tipo_de_retorno = self.visita(nodo.cuerpo, mi_ambiente)
-        if not tipo_de_retorno.conforms_to(metodo.return_type):
-            self.errores.append("FunctionDefinitionError: " + MensajeDeError.asignacion(metodo.return_type.name,tipo_de_retorno.name))
+        tipo_r = metodo.return_type.real_type(self.contexto.current_type)
+        if not tipo_de_retorno.conforms_to(tipo_r):
+            self.errores.append("FunctionDefinitionError: " + MensajeDeError.asignacion(tipo_r.name,tipo_de_retorno.name))
 
         if self.contexto.current_type.parent is not None:
             try:
                 clase_base : Type = self.contexto.current_type.parent
                 metodo_base = clase_base.get_method( nodo.id )
                 _condicion = len(metodo_base.param_types) == len(metodo.param_types)
-                _condicion = _condicion and metodo.return_type.conforms_to(metodo_base.return_type)
+                _condicion = _condicion and tipo_r.conforms_to(metodo_base.return_type)
                 if _condicion:
                     for i, tipo in enumerate( metodo.param_types ):
-                        _condicion = _condicion and tipo.conforms_to(metodo_base.param_types[i])
+                        _condicion = _condicion and tipo.real_type(self.contexto.current_type).conforms_to(metodo_base.param_types[i])
                 if not _condicion:
                     self.errores.append("FunctionDefinitionError: " + MensajeDeError.funcion_heredada(clase_base.name, metodo.name))
 
@@ -96,17 +100,18 @@ class ChequeoSemantico:
         lista_de_tipos = []
         for param in nodo.lista_de_exp:
             lista_de_tipos.append( self.visita(param, mi_ambiente))
-        
+
         if tipo_de_la_exp.is_auto_type: return tipo_de_la_exp
         tipo_de_retorno = ErrorType()
         try:
             metodo = tipo_de_la_exp.get_method( nodo.id )
-            tipo_de_retorno = metodo.return_type
+            tipo_de_retorno = metodo.return_type.real_type(tipo_de_la_exp)
             if not len(nodo.lista_de_exp) == len(metodo.param_names):
                 self.errores.append("DispathError: " + MensajeDeError.numero_de_parametros(tipo_de_la_exp.name,metodo.name,len(nodo.lista_de_exp)))
             for i, tipo_exp in enumerate( lista_de_tipos ):
-                if i < len(metodo.param_types) and not metodo.param_types[i].conforms_to( tipo_exp ):
-                    self.errores.append("DispathError: " + MensajeDeError.asignacion(metodo.param_types[i].name,tipo_exp.name))
+                tipo_p = metodo.param_types[i].real_type(tipo_de_la_exp)
+                if i < len(metodo.param_types) and not tipo_p.conforms_to( tipo_exp ):
+                    self.errores.append("DispathError: " + MensajeDeError.asignacion(tipo_p.name,tipo_exp.name))
         except SemanticError as se:
             self.errores.append("DispathError: " + se.text)
         
@@ -115,7 +120,7 @@ class ChequeoSemantico:
     @visitor.when( InvocacionEstatica )
     def visita(self, nodo : InvocacionEstatica, mi_ambiente : Scope):
         tipo_de_la_exp : Type = self.visita(nodo.exp,mi_ambiente)
-        tipo_especifico : Type = self.contexto.get_type( nodo.tipo_especifico ) 
+        tipo_especifico : Type = self.contexto.get_type( nodo.tipo_especifico ).real_type(self.contexto.current_type)
 
         lista_de_tipos = []
         for param in nodo.lista_de_exp:
@@ -142,12 +147,13 @@ class ChequeoSemantico:
                 self.errores.append("DispathError: " + se.text)      
         
         if metodo is not None:
-            tipo_de_retorno = metodo.return_type
+            tipo_de_retorno = metodo.return_type.real_type(tipo_especifico)
             if not len(nodo.lista_de_exp) == len(metodo.param_names):
                 self.errores.append("DispathError: " + MensajeDeError.numero_de_parametros(tipo_para_errores.name,metodo.name,len(nodo.lista_de_exp)))
             for i, tipo_exp in enumerate( lista_de_tipos ):
-                if i < len(metodo.param_types) and not metodo.param_types[i].conforms_to( tipo_exp ):
-                    self.errores.append("DispathError: " + MensajeDeError.asignacion(metodo.param_types[i].name,tipo_exp.name))
+                tipo_p = metodo.param_types[i].real_type(tipo_especifico)
+                if i < len(metodo.param_types) and not tipo_p.conforms_to( tipo_exp ):
+                    self.errores.append("DispathError: " + MensajeDeError.asignacion(tipo_p.name,tipo_exp.name))
       
         return tipo_de_retorno
 
@@ -160,7 +166,7 @@ class ChequeoSemantico:
         tipo_de_var = ErrorType()
         if var is None:
             self.errores.append("AssignationError: " + MensajeDeError.no_definida(nodo.id))
-        else: tipo_de_var = var.type
+        else: tipo_de_var = var.type.real_type(self.contexto.current_type)
 
         tipo_de_la_exp = self.visita(nodo.valor, mi_ambiente)
         if not tipo_de_la_exp.conforms_to(tipo_de_var):
@@ -215,29 +221,30 @@ class ChequeoSemantico:
             tipo_var = ErrorType()
             try:
                 temp = self.contexto.get_type(tipo)
-                tipo_var = temp
+                tipo_var = temp.real_type(self.contexto.current_type)
             except SemanticError as se:
                 self.errores.append("LetError :" + se.text)
-            if nodo.exp is not None:
+            if exp is not None:
                 tipo_de_la_exp = self.visita(exp, mi_ambiente)
                 if type(tipo_var) == type(ErrorType()):
                     tipo_var = tipo_de_la_exp
-            if mi_ambiente.is_defined(nombre):
+                if not tipo_de_la_exp.conforms_to(tipo_var):
+                    self.errores.append("LetError :" + MensajeDeError.asignacion(tipo_var.name,tipo_de_la_exp.name) )
+            if mi_ambiente.is_local(nombre):
                 self.errores.append(f"{nombre} is already defined")
-
-            mi_ambiente.define_variable(nombre,tipo_var) 
-            if not tipo_de_la_exp.conforms_to(tipo_var):
-                self.errores.append("LetError :" + MensajeDeError.asignacion(tipo_var.name,tipo_de_la_exp.name) )
+            else:
+                mi_ambiente.define_variable(nombre,tipo_var) 
+            
 
         return self.visita(nodo.exp, mi_ambiente)
     
     @visitor.when(Case)
     def visita(self, nodo : Case, mi_ambiente : Scope):
         _ = self.visita(nodo.exp, mi_ambiente)
-        tipo_de_retorno = self.contexto.built_in_type.objeto
+        tipo_de_retorno = None
         for idx, tipo, exp in nodo.lista_de_casos:
             try:
-                tipo_case = self.contexto.get_type(tipo)
+                tipo_case = self.contexto.get_type(tipo).real_type(self.contexto.current_type)
             except SemanticError as se:
                 tipo_case = ErrorType()
                 self.errores.append(se.text)
@@ -250,6 +257,9 @@ class ChequeoSemantico:
             tipo_de_la_exp = self.visita( exp, nuevo)
 
             while True:
+                if tipo_de_retorno is None:
+                    tipo_de_retorno = tipo_de_la_exp
+                    break
                 if tipo_de_retorno.is_auto_type or tipo_de_retorno.is_error_type:
                     break
                 if tipo_de_la_exp.is_auto_type or tipo_de_la_exp.is_error_type:
@@ -295,7 +305,7 @@ class ChequeoSemantico:
 
     @visitor.when(NuevoTipo)
     def visita(self, nodo : NuevoTipo, mi_ambiente : Scope):
-        tipo = "" if nodo.tipo in ["AUTO_TYPE","Void","SELF_TYPE"] else nodo.tipo
+        tipo = "" if nodo.tipo in ["AUTO_TYPE","Void"] else nodo.tipo
         try: 
             return self.contexto.get_type(tipo)
         except SemanticError as se:
@@ -325,11 +335,12 @@ class ChequeoSemantico:
         tipo_der = self.visita(nodo.der, mi_ambiente)
         tipo_isq = self.visita(nodo.isq, mi_ambiente)
         tipos_basicos = [self.contexto.built_in_type.bool,self.contexto.built_in_type.int,self.contexto.built_in_type.string]
-        for t in tipos_basicos:
-            if tipo_der.conforms_to(t) or tipo_isq.conforms_to(t):
-                if not (tipo_der.conforms_to(t) and tipo_isq.conforms_to(t)) :
-                    self.errores.append(MensajeDeError.operacion_invalida(tipo_der.name,tipo_isq.name,str(nodo)))
-                break
+        if not (tipo_der.is_auto_type or tipo_der.is_error_type or tipo_isq.is_auto_type or tipo_isq.is_error_type):
+            for t in tipos_basicos:
+                if tipo_der.conforms_to(t) or tipo_isq.conforms_to(t):
+                    if not (tipo_der.conforms_to(t) and tipo_isq.conforms_to(t)) :
+                        self.errores.append(MensajeDeError.operacion_invalida(tipo_der.name,tipo_isq.name,str(nodo)))
+                    break
         return self.contexto.built_in_type.bool
     
     @visitor.when(String)
@@ -350,7 +361,7 @@ class ChequeoSemantico:
         if var is None:
             self.errores.append(MensajeDeError.no_definida( nodo.id ))
             return ErrorType()
-        return var.type
+        return var.type.real_type(self.contexto.current_type)
 
 class MensajeDeError:
     @staticmethod

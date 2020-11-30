@@ -1,6 +1,6 @@
 from .dependencias import visitor
 from .dependencias import Programa, ClaseDeCool, DefAtributo, DefFuncion
-from .dependencias import Context, SemanticError, Type, ErrorType
+from .dependencias import Context, SemanticError, Type, ErrorType, Self
 
 class CreadorDeTipos:
     def __init__(self, contexto : Context, errores : list):
@@ -23,14 +23,17 @@ class CreadorDeTipos:
         self.contexto.current_type = self.contexto.get_type( nodo.id ) 
         tipo_actual = self.contexto.current_type
 
-        if nodo.clase_base is not None: 
-            def funcion( tipo_encontrado ):
-                tipo_actual.set_parent( tipo_encontrado )
-            
-            self.busca_el_tipo_y_evalua_la_funcion(
-                tipo = nodo.clase_base,
-                funcion = funcion
-            )
+        if nodo.clase_base is not None:
+            if nodo.clase_base in ["Int","Bool","String"]:
+                self.errores.append(f"Can't inherit or redifine {nodo.clase_base}")
+            else:
+                def funcion( tipo_encontrado ):
+                    tipo_actual.set_parent( tipo_encontrado )
+                
+                self.busca_el_tipo_y_evalua_la_funcion(
+                    tipo = nodo.clase_base,
+                    funcion = funcion
+                )
 
         for m in nodo.lista_de_miembros:
             self.visita(m)            
@@ -73,7 +76,9 @@ class CreadorDeTipos:
 ######################################## Metodos Privados y Auxiliares ############################################
     def busca_el_tipo_y_evalua_la_funcion (self, tipo , funcion ):
         try:
-            tipo_encontrado = self.contexto.get_type( tipo )
+            if tipo == "SELF_TYPE":
+                tipo_encontrado = Self()
+            else: tipo_encontrado = self.contexto.get_type( tipo )
         except SemanticError as se:
             tipo_encontrado = ErrorType()
             self.errores.append(se.text)

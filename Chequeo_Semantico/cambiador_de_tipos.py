@@ -1,37 +1,30 @@
 from .dependencias import *
 from .inferencia_de_tipos import BaseDeInferencia
 
+caracter = chr(185)
+caracterWarning = chr(186)
+
 class CambiadorDeTipos(BaseDeInferencia):
     def __init__(self, contexto : Context, errores : list):
         BaseDeInferencia.__init__(self,contexto)
         self.errores = errores
-    
+        
     def nombre_de(self, tipo : Type, nombre):
         if tipo.is_auto_type:
-            try: return self.seleccion_deL_tipo_superior(tipo.tipos_posibles, nombre)
-            except SemanticError as se:
-                self.errores.append(se.text)
-                return self.contexto.built_in_type.objeto.name
-
+            tipos = self.seleccion_deL_tipo_superior(tipo.tipos_posibles)
+            if tipos is None:
+                self.errores.append(f"InferenceWarning: {nombre} The set of inferred types is empty")
+                return caracterWarning + self.contexto.built_in_type.objeto.name
+            if len(tipos) > 1:
+                texto = ""
+                for t in tipos:
+                    texto += t + ", "
+                self.errores.append(f"InferenceWarning: {nombre} Could not infer between {texto[:-2]}")
+                return caracterWarning + tipos[0]
+            
+            return caracter + tipos[0]
         else:
             return tipo.name
-
-    def seleccion_deL_tipo_superior(self, tipos_posibles,nombre):
-        resultado = None
-        lista_auxiliar = []
-        for tipo in tipos_posibles:
-            if tipo in lista_auxiliar or tipo == "nueva": continue
-            
-            tipo = self.contexto.get_type(tipo) 
-            if resultado is not None and not tipo.conforms_to(resultado):
-                raise SemanticError(f"InferenceWarning: {nombre} Could not infer between {tipo.name} and {resultado.name}")
-            else:
-                lista_auxiliar = self.superiormente_acotados_por[ tipo.name ]
-                resultado = tipo
-
-        if resultado is None:
-            raise SemanticError(f"InferenceWarning: {nombre} The set of inferred types is empty")
-        return resultado.name
 
     @visitor.on("nodo")
     def visita(self, nodo, mi_ambiente):
@@ -86,12 +79,17 @@ class CambiadorDeTipos(BaseDeInferencia):
         cuerpo = self.visita(nodo.cuerpo, mi_ambiente)
         return DefFuncion( nodo.id, lista_de_parametros, cuerpo, tipo_de_retorno)
     
+    @visitor.when(Asignacion)
+    def visita(self, nodo : Asignacion, mi_ambiente : Scope):
+        return Asignacion(nodo.id, self.visita(nodo.valor,mi_ambiente))
+
+
     @visitor.when(Invocacion)
     def visita(self, nodo : Invocacion, mi_ambiente : Scope):
         if nodo.exp is not None:
             exp = self.visita(nodo.exp, mi_ambiente)
         else:
-            exp = None, self.contexto.current_type
+            exp = None
 
         lista_de_exp = []
         for param in nodo.lista_de_exp: 
@@ -139,7 +137,8 @@ class CambiadorDeTipos(BaseDeInferencia):
         for nombre, tipo, exp in nodo.lista_de_acciones:
             var = mi_ambiente.find_variable( nombre )
             t = self.nombre_de(var.type, f"Let declaration {nombre} variable")
-            e = self.visita(exp,mi_ambiente)
+            if exp is not None: e = self.visita(exp,mi_ambiente)
+            else: e = None
             lista.append( ( nombre, t, e ) )
 
         exp = self.visita( nodo.exp, mi_ambiente )

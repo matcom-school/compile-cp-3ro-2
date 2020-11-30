@@ -14,6 +14,7 @@ def lexer(programa:str):
     #special = r"|\n"
     regex = re.compile(keywords + nums + string + idex + symbols,re.DOTALL)
     text = regex.findall(programa)
+    alg=len(text)
     return tokenizer(text)
 
 def tokenizer(text):

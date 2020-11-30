@@ -1,13 +1,13 @@
-from cmp.evaluation import evaluate_reverse_parse
-from cmp.tools.parsing import LR1Parser
+from .evaluacion import evaluate_reverse_parse
+from .LR1_Parser import LR1Parser
 from Lenguaje import G
-
+ 
 parser = LR1Parser(G)
 
 def Parsear(tokens):
-    parse, operations, result = parser(tokens)
-    if not result:
-        return
-    return evaluate_reverse_parse(parse, operations, tokens)
+    parse, operaciones, resultado = parser(tokens)
+    if not resultado:
+        return None,parse,False
+    return evaluate_reverse_parse(parse, operaciones, tokens),"",True
 
 

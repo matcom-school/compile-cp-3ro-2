@@ -7,8 +7,9 @@ class BaseDeInferencia:
         self.acotados_por_el_metodo = {}
         self.hay_cambio = True
         self.contexto : Context = contexto
-        self.lista_de_tipos = list(set(contexto.types.keys()) ^ set(["AUTO_TYPE","SELF_TYPE","Object","Void"]))
-        
+        self.lista_de_tipos = list(set(contexto.types.keys()) ^ set(["AUTO_TYPE","Object","Void"]))
+        self.arbol_de_tipos = self.cambiar_a_no_dirigido()
+
         for tipo in self.lista_de_tipos + ["Object"]:
             tipo = self.contexto.get_type(tipo)
             self.superiormente_acotados_por[tipo.name] = self.lista_de_superiormente_acotados_por(tipo)
@@ -34,21 +35,71 @@ class BaseDeInferencia:
             tipo = tipo.parent
         
         return resultado + ["Object"]
+
+    def cambiar_a_no_dirigido(self):
+        resultado = {}
+        resultado["Object"] = []
+        for nombre in self.lista_de_tipos:
+            resultado[nombre] = []
+        for nombre in self.lista_de_tipos:
+            tipo = self.contexto.get_type(nombre)
+            try:
+                resultado[tipo.parent.name].append(nombre)
+            except AttributeError:
+                resultado["Object"].append(nombre) 
+        return resultado
+    
+    def componente_conexa(self,lista):
+        raiz = "Object"
+        lista_aux : list = lista.copy()
+        v = lista_aux[0]
+        lista_aux.remove(v)
+        cola = [v]
+        for nodo in cola:
+            try:
+                padre = self.contexto.get_type(nodo).parent.name
+            except AttributeError:
+                padre = self.contexto.built_in_type.objeto.name    
+            if padre in lista:
+                l = self.arbol_de_tipos[nodo] + [padre]
+            else:
+                raiz = nodo
+                l =  self.arbol_de_tipos[nodo]
+            for u in l:
+                if u in lista_aux:
+                    cola.append(u)
+                    lista_aux.remove(u)
+    
+        return raiz, lista_aux
+    
+    def camino_recto_mas_largo(self,raiz,lista):
+        while any(self.arbol_de_tipos[raiz]):
+            cont = 0
+            pivot = None
+            for hijo in self.arbol_de_tipos[raiz]:
+                if hijo in lista:
+                    cont += 1
+                    pivot = hijo
+            if cont == 1:
+                raiz = pivot
+            else:
+                break
+            
+        return raiz
     
     def seleccion_deL_tipo_superior(self, tipos_posibles):
-        resultado = None
-        lista_auxiliar = []
-        for tipo in tipos_posibles:
-            if tipo in lista_auxiliar or tipo == "nueva": continue
-            tipo = self.contexto.get_type(tipo)
+        if not any(tipos_posibles) or "nueva" in tipos_posibles: return None
 
-            if resultado is not None and not tipo.conforms_to(resultado): return None
-            else:
-                lista_auxiliar = self.superiormente_acotados_por[ tipo.name ]
-                resultado = tipo
-
-        return resultado.name if resultado is not None else None
-
+        lista = tipos_posibles
+        resultado = []
+        while True:
+            raiz, lista_aux = self.componente_conexa(lista)
+            lista = list( set(lista) ^ set(lista_aux) ) 
+            resultado.append( self.camino_recto_mas_largo(raiz,lista))
+            lista = lista_aux
+            if not any(lista): break
+        
+        return resultado
 
     #implemntacion para que admita auto tipos
     def maxima_comun_cota(self, tipo1: Type,tipo2 : Type):
@@ -78,8 +129,7 @@ class BaseDeInferencia:
 
         nueva = set( posibles ) & set(cotas) 
         self.hay_cambio = self.hay_cambio and chequear_cambio and any(nueva ^ set( posibles ))
-        
-        return nueva
+        return list( nueva )
 
     def cota_es_auto(self,tipo : Type):
         if tipo.is_auto_type:
@@ -122,8 +172,8 @@ class Inferencia(BaseDeInferencia):
             if tipo.is_auto_type:
                 tipo_de_la_exp = self.visita( exp , mi_ambiente, acotacion)
                 cota_superior = self.cota_superior(tipo_de_la_exp)
-                nueva = self.acotacion(tipo.tipos_posibles, cota_superior)
-                return True, Auto( nueva ), tipo_de_la_exp
+
+                return True, cota_superior, tipo_de_la_exp
             else: 
                 cota_inferior = self.cota_inferior(tipo)
                 cota_inferior = self.acotacion(cota_inferior, acotacion, False)
@@ -147,7 +197,7 @@ class Inferencia(BaseDeInferencia):
     @visitor.when(ClaseDeCool)
     def visita(self, nodo : ClaseDeCool, mi_ambiente : Scope, acotacion = None):
         mi_ambiente = mi_ambiente.children[nodo]
-        self.clase_actual = self.contexto.get_type( nodo.id )
+        self.contexto.current_type = self.contexto.get_type( nodo.id )
         for m in nodo.lista_de_miembros:
             self.visita(m , mi_ambiente, None)
     
@@ -155,18 +205,22 @@ class Inferencia(BaseDeInferencia):
     def visita(self, nodo : DefAtributo, mi_ambiente : Scope, acotacion = None):
         if nodo.exprecion is not None: 
             var = mi_ambiente.find_variable( nodo.id )
-            _bool, tipo, _ = self.infiere_y_sigue_el_recorrido( var.type, nodo.exprecion, mi_ambiente)
+            tipo = var.type.real_type(self.contexto.current_type)
+            _bool, cotas, _ = self.infiere_y_sigue_el_recorrido( tipo, nodo.exprecion, mi_ambiente)
             if _bool :
-                var.type = tipo
+                nueva = self.acotacion(var.type.tipos_posibles, cotas )
+                var.type = Auto( nueva )
             
     @visitor.when(DefFuncion)
     def visita(self, nodo : DefFuncion, mi_ambiente : Scope, acotacion = None):
         mi_ambiente = mi_ambiente.children[nodo]
         metodo = self.contexto.current_type.get_method( nodo.id )
         
-        _bool, tipo, _ = self.infiere_y_sigue_el_recorrido( metodo.return_type, nodo.cuerpo, mi_ambiente)
+        tipo = metodo.return_type.real_type(self.contexto.current_type)
+        _bool, cotas, _ = self.infiere_y_sigue_el_recorrido( tipo, nodo.cuerpo, mi_ambiente)
         if _bool:
-            metodo.return_type = tipo
+            nueva = self.acotacion( metodo.return_type.tipos_posibles, cotas )
+            metodo.return_type = Auto( nueva )
                
 
     @visitor.when(Invocacion)
@@ -179,23 +233,24 @@ class Inferencia(BaseDeInferencia):
 
         if tipo_de_la_exp.is_auto_type:
             clase_superior = self.seleccion_deL_tipo_superior(tipo_de_la_exp.tipos_posibles)
-            if clase_superior is not None: tipo_de_la_exp = self.contexto.get_type(clase_superior)
+            if clase_superior is not None and len(clase_superior) == 1 : tipo_de_la_exp = self.contexto.get_type(clase_superior[0])
         
     
         try:
             metodo = tipo_de_la_exp.get_method( nodo.id )
         
             for i, exp in enumerate( nodo.lista_de_exp ):
-                _bool, tipo, _ = self.infiere_y_sigue_el_recorrido( metodo.param_types[i], exp, mi_ambiente )
+                tipo = metodo.param_types[i].real_type(tipo_de_la_exp)
+                _bool, cotas, _ = self.infiere_y_sigue_el_recorrido( tipo, exp, mi_ambiente )
                 if _bool:
-                    metodo.param_types[i] = tipo
-            
+                    nueva = self.acotacion( metodo.param_types[i].tipos_posibles, cotas )
+                    metodo.param_types[i] = Auto( nueva )            
 
             if metodo.return_type.is_auto_type:
                 nueva = self.acotacion(metodo.return_type.tipos_posibles, acotacion)
                 metodo.return_type = Auto( nueva )
 
-            return metodo.return_type
+            return metodo.return_type.real_type(tipo_de_la_exp)
         except SemanticError :
             for exp in nodo.lista_de_exp:
                 self.visita(exp, mi_ambiente)
@@ -212,22 +267,26 @@ class Inferencia(BaseDeInferencia):
         metodo = tipo_especifico.get_method( nodo.id )
 
         for i, exp in enumerate( nodo.lista_de_exp ):
-            _bool, tipo, _ = self.infiere_y_sigue_el_recorrido( metodo.param_types[i], exp, mi_ambiente )
+            tipo = metodo.param_types[i].real_type(tipo_especifico)
+            _bool, cotas, _ = self.infiere_y_sigue_el_recorrido( tipo, exp, mi_ambiente )
             if _bool:
-                metodo.param_types[i] = tipo
+                nueva = self.acotacion( metodo.param_types[i].tipos_posibles, cotas )
+                metodo.param_types[i] = Auto( nueva )            
         
         if metodo.return_type.is_auto_type:
             nueva = self.acotacion(metodo.return_type.tipos_posibles, acotacion)
             metodo.return_type = Auto( nueva )
 
-        return metodo.return_type
+        return metodo.return_type.real_type(tipo_especifico)
 
     @visitor.when(Asignacion)
     def visita(self, nodo : Asignacion, mi_ambiente : Scope, acotacion = None):
         var = mi_ambiente.find_variable( nodo.id )
-        _bool, tipo, tipo_de_la_exp = self.infiere_y_sigue_el_recorrido( var.type, nodo.valor, mi_ambiente, acotacion )
+        tipo = var.type.real_type(self.contexto.current_type)
+        _bool, cotas, tipo_de_la_exp = self.infiere_y_sigue_el_recorrido( tipo , nodo.valor, mi_ambiente, acotacion )
         if _bool:
-            var.type = tipo
+            nueva = self.acotacion( var.type.tipos_posibles, cotas )
+            var.type = Auto( nueva )            
 
         return tipo_de_la_exp
 
@@ -242,13 +301,17 @@ class Inferencia(BaseDeInferencia):
         if tipo_s.is_auto_type or tipo_n.is_auto_type:
             if not tipo_n.is_auto_type:
                 acotacion_por_rama = self.get_toda_la_rama_de(tipo_n)
-                return self.visita( nodo.exp_si_true, mi_ambiente, acotacion_por_rama )
+                auto = self.visita( nodo.exp_si_true, mi_ambiente, acotacion_por_rama )
             elif not tipo_s.is_auto_type:
                 acotacion_por_rama = self.get_toda_la_rama_de(tipo_s)
-                return self.visita( nodo.exp_si_false, mi_ambiente, acotacion_por_rama )
+                auto = self.visita( nodo.exp_si_false, mi_ambiente, acotacion_por_rama )
             else:
-                return Auto( set(tipo_s.tipos_posibles).union(set(tipo_n.tipos_posibles)) )
-        
+                auto = Auto( set(tipo_s.tipos_posibles).union(set(tipo_n.tipos_posibles)) )
+
+            raiz, resto = self.componente_conexa(auto.tipos_posibles)
+            if not any(resto): return self.contexto.get_type(raiz)
+            else: return auto
+
         return self.maxima_comun_cota(tipo_s,tipo_n)
 
     @visitor.when(WhileLoop)
@@ -269,11 +332,14 @@ class Inferencia(BaseDeInferencia):
     def visita(self, nodo : LetIn, mi_ambiente : Scope, acotacion = None):
         mi_ambiente : Scope = mi_ambiente.children[nodo]
         
-        for nombre, tipo, exp in nodo.lista_de_acciones:
+        for nombre, _, exp in nodo.lista_de_acciones:
             var = mi_ambiente.find_variable( nombre )
-            _bool, tipo, _ = self.infiere_y_sigue_el_recorrido( var.type, exp, mi_ambiente)
+            tipo = var.type.real_type(self.contexto.current_type)
+            _bool, cotas, _ = self.infiere_y_sigue_el_recorrido( tipo, exp, mi_ambiente)
             if _bool:
-                var.type = tipo
+                nueva = self.acotacion( var.type.tipos_posibles, cotas )
+                var.type = Auto( nueva )   
+
         
         return self.visita(nodo.exp, mi_ambiente, acotacion)
             
@@ -282,13 +348,16 @@ class Inferencia(BaseDeInferencia):
         conjunto_de_tipos = set()
         tipo_de_retorno = None
         for _, tipo, exp in nodo.lista_de_casos:
+            tipo = self.contexto.get_type(tipo).real_type(self.contexto.current_type)
             cota_inferior = self.cota_inferior(tipo)
-            conjunto_de_tipos.union( set(cota_inferior) )
+            conjunto_de_tipos = conjunto_de_tipos.union( set(cota_inferior) )
             nuevo_tipo = self.visita(exp,mi_ambiente.children[exp],acotacion)
-            tipo_de_retorno = self.maxima_comun_cota(tipo_de_retorno,nuevo_tipo)
-
+            if tipo_de_retorno is None:
+                tipo_de_retorno = nuevo_tipo
+            else:
+                tipo_de_retorno = self.maxima_comun_cota(tipo_de_retorno,nuevo_tipo)
+        
         self.visita( nodo.exp, mi_ambiente, list(conjunto_de_tipos) )
-
         return tipo_de_retorno
     
     @visitor.when(NuevoTipo)
@@ -377,7 +446,7 @@ class Inferencia(BaseDeInferencia):
         if var.type.is_auto_type:
             nueva = self.acotacion( var.type.tipos_posibles, acotacion)
             var.type = Auto( nueva )
-        return var.type
+        return var.type.real_type(self.contexto.current_type)
 
 
 
