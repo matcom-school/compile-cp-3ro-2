@@ -29,7 +29,8 @@ def Chequeo_Semantico(ast):
     i.visita(ast, scope)
     c = CambiadorDeTipos(cs.contexto, errores)
     nuevo_ast = c.visita(ast,scope)
-    
+    print(errores)
+
     errores = []
     re = RecolectorDeTipos(errores)
     _bool = re.visita(nuevo_ast)

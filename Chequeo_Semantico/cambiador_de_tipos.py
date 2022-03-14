@@ -16,6 +16,7 @@ class CambiadorDeTipos(BaseDeInferencia):
                 self.errores.append(f"InferenceWarning: {nombre} The set of inferred types is empty")
                 return caracterWarning + self.contexto.built_in_type.objeto.name
             if len(tipos) > 1:
+                print(tipo.tipos_posibles)
                 texto = ""
                 for t in tipos:
                     texto += t + ", "

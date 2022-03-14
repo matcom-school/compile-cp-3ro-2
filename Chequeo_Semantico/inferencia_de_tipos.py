@@ -5,6 +5,7 @@ class BaseDeInferencia:
         self.inferiormente_acotados_por = {}
         self.superiormente_acotados_por = {}
         self.acotados_por_el_metodo = {}
+        self.retorno_del_metodo = {}
         self.hay_cambio = True
         self.contexto : Context = contexto
         self.lista_de_tipos = list(set(contexto.types.keys()) ^ set(["AUTO_TYPE","Object","Void"]))
@@ -12,13 +13,23 @@ class BaseDeInferencia:
 
         for tipo in self.lista_de_tipos + ["Object"]:
             tipo = self.contexto.get_type(tipo)
+            self.contexto.current_type = tipo
             self.superiormente_acotados_por[tipo.name] = self.lista_de_superiormente_acotados_por(tipo)
             self.inferiormente_acotados_por[tipo.name] = self.lista_de_inferiormente_acotados_por(tipo)
             for metodo in tipo.methods:
+                t = self.contexto.get_type(metodo.return_type.name)
                 try:
                     self.acotados_por_el_metodo[(metodo.name,len(metodo.param_names))].add(tipo.name)
                 except KeyError:
                     self.acotados_por_el_metodo[(metodo.name,len(metodo.param_names))] = set([tipo.name])
+                if not t.is_auto_type:
+                    try:
+                        self.retorno_del_metodo[(metodo.name,len(metodo.param_names))].add(t.name)
+                    except KeyError:
+                        self.retorno_del_metodo[(metodo.name,len(metodo.param_names))] =set([t.name])
+                        
+
+        self.contexto.current_type = None
 
     def lista_de_inferiormente_acotados_por(self,tipo : Type):
         resultado = []
@@ -51,7 +62,7 @@ class BaseDeInferencia:
     
     def componente_conexa(self,lista):
         raiz = "Object"
-        lista_aux : list = lista.copy()
+        lista_aux : list = list(lista).copy()
         v = lista_aux[0]
         lista_aux.remove(v)
         cola = [v]
@@ -94,6 +105,11 @@ class BaseDeInferencia:
         resultado = []
         while True:
             raiz, lista_aux = self.componente_conexa(lista)
+            r = self.contexto.get_type(raiz)
+            for t in lista_aux:
+                t = self.contexto.get_type(t)
+                if t.conforms_to(r): lista_aux.remove(t.name)
+                
             lista = list( set(lista) ^ set(lista_aux) ) 
             resultado.append( self.camino_recto_mas_largo(raiz,lista))
             lista = lista_aux
@@ -110,7 +126,8 @@ class BaseDeInferencia:
                 el_tipo, el_auto = tipo2, tipo1
             else:
                 el_tipo, el_auto = tipo1, tipo2
-                return Auto( self.acotacion( el_auto.tipos_posibles, (el_tipo,el_tipo,True)))
+            rama = self.get_toda_la_rama_de(el_tipo)
+            return Auto( self.acotacion( el_auto.tipos_posibles, rama, False ) )
         while True:
             if tipo1 is None or tipo2 is None : return self.contexto.get_type("Object")
             if tipo1.conforms_to(tipo2) : return tipo2
@@ -126,9 +143,12 @@ class BaseDeInferencia:
         if "nueva" in posibles:
             self.hay_cambio = True
             return cotas
-
+        
         nueva = set( posibles ) & set(cotas) 
-        self.hay_cambio = self.hay_cambio and chequear_cambio and any(nueva ^ set( posibles ))
+        #print(posibles, "  ", cotas, "   ", nueva)
+        
+        self.hay_cambio = self.hay_cambio or (chequear_cambio and any(nueva ^ set( posibles )))
+        
         return list( nueva )
 
     def cota_es_auto(self,tipo : Type):
@@ -162,7 +182,16 @@ class BaseDeInferencia:
         if _bool: return lista
         
         return self.inferiormente_acotados_por[tipo.name]
-  
+    def auto_acotacion(self,tipo,tipo_auto):
+        if not tipo_auto.is_auto_type:
+            return tipo
+        
+        cotas = tipo_auto.tipos_posibles
+        if not any(cotas) or "nueva" in cotas:
+            return tipo
+        
+        nueva = self.acotacion(tipo.tipos_posibles, cotas)
+        return Auto( nueva )
 
 class Inferencia(BaseDeInferencia):
     def __init__(self, contexto : Context):
@@ -170,6 +199,9 @@ class Inferencia(BaseDeInferencia):
    
     def infiere_y_sigue_el_recorrido(self, tipo : Type, exp, mi_ambiente : Scope, acotacion : list = None):
             if tipo.is_auto_type:
+                if "nueva" in tipo.tipos_posibles:
+                    acotacion = acotacion
+                else : acotacion = self.acotacion(tipo.tipos_posibles,acotacion,False)
                 tipo_de_la_exp = self.visita( exp , mi_ambiente, acotacion)
                 cota_superior = self.cota_superior(tipo_de_la_exp)
 
@@ -213,7 +245,7 @@ class Inferencia(BaseDeInferencia):
             
     @visitor.when(DefFuncion)
     def visita(self, nodo : DefFuncion, mi_ambiente : Scope, acotacion = None):
-        mi_ambiente = mi_ambiente.children[nodo]
+        mi_ambiente : Scope = mi_ambiente.children[nodo]
         metodo = self.contexto.current_type.get_method( nodo.id )
         
         tipo = metodo.return_type.real_type(self.contexto.current_type)
@@ -221,7 +253,11 @@ class Inferencia(BaseDeInferencia):
         if _bool:
             nueva = self.acotacion( metodo.return_type.tipos_posibles, cotas )
             metodo.return_type = Auto( nueva )
-               
+        
+        for i, nombre in enumerate(metodo.param_names):
+            if metodo.param_types[i].is_auto_type:
+                var = mi_ambiente.find_variable(nombre)
+                metodo.param_types[i] = self.auto_acotacion(metodo.param_types[i],var.type)
 
     @visitor.when(Invocacion)
     def visita(self, nodo : Invocacion, mi_ambiente : Scope, acotacion = None):
@@ -254,8 +290,11 @@ class Inferencia(BaseDeInferencia):
         except SemanticError :
             for exp in nodo.lista_de_exp:
                 self.visita(exp, mi_ambiente)
-
-            resultado = Auto( self.acotacion(self.lista_de_tipos, acotacion, False)) 
+            try:
+                posibles = self.retorno_del_metodo[nodo.id,len(nodo.lista_de_exp)]
+                resultado = Auto( self.acotacion(list(posibles), acotacion, False))
+            except KeyError:
+                resultado = Auto( self.acotacion(self.lista_de_tipos, acotacion, False)) 
             return resultado
             
 
@@ -307,10 +346,8 @@ class Inferencia(BaseDeInferencia):
                 auto = self.visita( nodo.exp_si_false, mi_ambiente, acotacion_por_rama )
             else:
                 auto = Auto( set(tipo_s.tipos_posibles).union(set(tipo_n.tipos_posibles)) )
-
-            raiz, resto = self.componente_conexa(auto.tipos_posibles)
-            if not any(resto): return self.contexto.get_type(raiz)
-            else: return auto
+            
+            return auto
 
         return self.maxima_comun_cota(tipo_s,tipo_n)
 

@@ -129,7 +129,7 @@ class Self(Type):
 class Auto(Type):
     def __init__(self, tipos_posibles = ["nueva"]):
         Type.__init__(self, "AUTO_TYPE")
-        self.tipos_posibles = tipos_posibles
+        self.tipos_posibles = list(tipos_posibles)
     def bypass(self):
         return True
     def conforms_to(self,other):
